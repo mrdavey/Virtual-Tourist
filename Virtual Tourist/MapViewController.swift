@@ -10,21 +10,38 @@ import UIKit
 import MapKit
 import CoreData
 
-class MapViewController: UIViewController, MKMapViewDelegate {
+class MapViewController: UIViewController, MKMapViewDelegate, NSFetchedResultsControllerDelegate {
     
-    var temp = 0
     var sharedContext: NSManagedObjectContext { return CoreDataStackManager.sharedInstance().managedObjectContext }
+    var tempContext: NSManagedObjectContext!
+    
     var pinAddedViaLongPress: Pin!
+    var pins: [Pin]?
+    var tempPin: Pin!
     
     @IBOutlet weak var mapView: MKMapView!
     
     override func viewDidLoad() {
         super.viewDidLoad()
         
-        restoreMapRegion()
-        self.mapView.addAnnotations(fetchAllObjects())
+        // Start the fetched results controller
+        do {
+            try fetchedResultsController.performFetch()
+        } catch let error as NSError {
+            print("Error performing initial fetch: \(error.localizedDescription)")
+        }
+        
+        self.pins = fetchAllObjects()
+        self.mapView.addAnnotations(pins!)
         
         self.mapView.delegate = self
+        fetchedResultsController.delegate = self
+        restoreExistingMapRegion()
+        
+        
+
+        tempContext = NSManagedObjectContext(concurrencyType: NSManagedObjectContextConcurrencyType.MainQueueConcurrencyType)
+        tempContext.persistentStoreCoordinator = sharedContext.persistentStoreCoordinator
     }
     
     @IBAction func userLongPressedMapView(sender: UILongPressGestureRecognizer) {
@@ -32,56 +49,109 @@ class MapViewController: UIViewController, MKMapViewDelegate {
         let tapPointCoordinate = mapView.convertPoint(tapPoint, toCoordinateFromView: self.mapView)
         
         if sender.state == UIGestureRecognizerState.Began {
-            pinAddedViaLongPress = Pin(annotationTitle: "Loading...", annotationLatitude: tapPointCoordinate.latitude, annotationLongitude: tapPointCoordinate.longitude, context: sharedContext)
-            self.mapView.addAnnotation(pinAddedViaLongPress)
+            tempPin = Pin(annotationLatitude: tapPointCoordinate.latitude, annotationLongitude: tapPointCoordinate.longitude, context: self.tempContext)
+            self.mapView.addAnnotation(tempPin)
         } else if sender.state == UIGestureRecognizerState.Changed {
-            pinAddedViaLongPress.coordinate = tapPointCoordinate
+            tempPin.coordinate = tapPointCoordinate
         } else if sender.state == UIGestureRecognizerState.Ended {
-            pinAddedViaLongPress.coordinate = tapPointCoordinate
-            reverseGeocodeLocation(tapPointCoordinate)
-            CoreDataStackManager.sharedInstance().saveContext()
-            self.mapView.selectAnnotation(pinAddedViaLongPress, animated: true)
+            tempPin.coordinate = tapPointCoordinate
             UIView.animateWithDuration(0.5) {
-                self.mapView.centerCoordinate = self.pinAddedViaLongPress.coordinate
+                self.mapView.centerCoordinate = self.tempPin.coordinate
             }
             
+            self.preFetchFlickerImages()
         }
     }
     
-    // Reverse Geocode location of pin drop
-    func reverseGeocodeLocation(coordinate: CLLocationCoordinate2D) {
-        CLGeocoder().reverseGeocodeLocation(CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)) { placemarks, error in
+    // MARK: - Fetch data
+    func preFetchFlickerImages() {
+        print("Running preFetchFlickrImages")
+        UIApplication.sharedApplication().networkActivityIndicatorVisible = true
+        
+        // Check if any photos in that location
+        FlickrClient.sharedInstance().getImagesFromFlickrBySearch(tempPin.coordinate.latitude, longitude: tempPin.coordinate.longitude) { result, error in
             
-            if error != nil {
-                print("Reverse Geocode Fail Error: \(error!.localizedDescription)")
+            guard (error == nil) else {
+                // TODO: - Show error
+                dispatch_async(dispatch_get_main_queue()) {
+                    self.mapView.removeAnnotation(self.tempPin)
+                }
+                print("Error occured \(error!)")
+                UIApplication.sharedApplication().networkActivityIndicatorVisible = false
                 return
             }
-            if placemarks?.count > 0 {
-                let pm = placemarks![0]
-                if let annotationTitle = pm.locality ?? pm.subLocality {
-                    self.pinAddedViaLongPress.title = annotationTitle
-                } else {
-                    self.pinAddedViaLongPress.title = "Unknown place"
+            self.pinAddedViaLongPress = Pin(annotationLatitude: self.tempPin.coordinate.latitude, annotationLongitude: self.tempPin.coordinate.longitude, context: self.sharedContext)
+            dispatch_async(dispatch_get_main_queue()) {
+                self.mapView.addAnnotation(self.pinAddedViaLongPress)
+                self.mapView.removeAnnotation(self.tempPin)
+            }
+            
+            if let photosDictionary = result?.valueForKey("photo") as? [[String : AnyObject]] {
+                //Parse the dict
+                if photosDictionary.count > 0 {
+                    print("PhotoDictionary Count: \(photosDictionary.count)")
+                    var photoCount = 1
+                    let _ = photosDictionary.map() { (dictionary: [String: AnyObject]) -> Photo in
+                        let photo = Photo(dictionary: dictionary, context: self.sharedContext)
+                        
+                        let imageData = NSData(contentsOfURL: NSURL(string: photo.url_q)!)
+                        photo.urlImage = UIImage(data: imageData!)
+                        photo.pin = self.pinAddedViaLongPress
+                        print("photoCount: \(photoCount++)")
+                        return photo
+                    }
+                    CoreDataStackManager.sharedInstance().saveContext()
                 }
+                UIApplication.sharedApplication().networkActivityIndicatorVisible = false
             } else {
-                self.pinAddedViaLongPress.title = "Unknown place"
+                UIApplication.sharedApplication().networkActivityIndicatorVisible = false
+                // TODO: - error message
+                print("0 photos returned")
             }
         }
     }
     
-    
-    // MARK: - Fetch allObjects and load pins
     func fetchAllObjects() -> [Pin] {
-        let fetchRequest = NSFetchRequest(entityName: "Pin")
-        do {
-            return try sharedContext.executeFetchRequest(fetchRequest) as! [Pin]
-        } catch let error as NSError {
-            print("Error: \(error.localizedDescription)")
+        guard (fetchedResultsController.fetchedObjects != nil) else {
+            print("nil objects in fetchedResultsController")
             return [Pin]()
+        }
+        return fetchedResultsController.fetchedObjects as! [Pin]
+    }
+    
+    func fetchExistingMapRegion() -> MapRegion {
+        let mapRegion = [
+            "latitude" : mapView.region.center.latitude,
+            "longitude" : mapView.region.center.longitude,
+            "latitudeDelta" : mapView.region.span.latitudeDelta,
+            "longitudeDelta" : mapView.region.span.longitudeDelta
+        ]
+        
+        let fetchRequest = NSFetchRequest(entityName: "MapRegion")
+        do {
+            if let alreadyExistingMapRegion = try sharedContext.executeFetchRequest(fetchRequest).first as? MapRegion {
+                return alreadyExistingMapRegion
+            } else {
+                print("creating region")
+                return MapRegion(mapRegion: mapRegion, context: sharedContext)
+            }
+        } catch let error as NSError {
+            print("Error fetching mapRegion: \(error.localizedDescription).")
+            return MapRegion(mapRegion: mapRegion, context: sharedContext)
         }
     }
     
+    lazy var fetchedResultsController: NSFetchedResultsController = {
+        let fetchRequest = NSFetchRequest(entityName: "Pin")
+        fetchRequest.sortDescriptors = []
+        let fetchedResultsController = NSFetchedResultsController(fetchRequest: fetchRequest,
+            managedObjectContext: self.sharedContext,
+            sectionNameKeyPath: nil,
+            cacheName: nil)
+        return fetchedResultsController
+        }()
     
+
     // MARK: - MapView Delegates
     
     // Annotations setup
@@ -91,55 +161,50 @@ class MapViewController: UIViewController, MKMapViewDelegate {
         
         if pinView == nil {
             pinView = MKPinAnnotationView(annotation: annotation, reuseIdentifier: reuseId)
-            pinView!.canShowCallout = true
+            pinView!.canShowCallout = false
             pinView!.pinTintColor = UIColor.redColor()
-            pinView!.rightCalloutAccessoryView = UIButton(type: UIButtonType.DetailDisclosure)
         } else {
             pinView!.annotation = annotation
         }
-        
         return pinView
     }
     
-    // TODO: - fix URL open for subtitle
-    
-    func mapView(mapView: MKMapView, annotationView view: MKAnnotationView, calloutAccessoryControlTapped control: UIControl) {
-        if control == view.rightCalloutAccessoryView {
-            let app  = UIApplication.sharedApplication()
-            if let subtitle = view.annotation!.subtitle! {
-                app.openURL(NSURL(string: subtitle)!)
-            }
-        }
+    func mapView(mapView: MKMapView, didSelectAnnotationView view: MKAnnotationView) {
+        self.mapView.deselectAnnotation(view.annotation, animated: false)
+        
+        let controller = storyboard!.instantiateViewControllerWithIdentifier("PhotosCollectionViewController") as! PhotosCollectionViewController
+
+        let selectedPin = view.annotation as! Pin
+        controller.pin = selectedPin
+        controller.restoreMapRegion = fetchExistingMapRegion()
+        controller.numberOfPhotos = selectedPin.photos.count
+        
+        print("MapVC, selectedPin photoCount: \(selectedPin.photos.count)")
+        self.navigationController!.pushViewController(controller, animated: true)
     }
-    
+
     func mapView(mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
-        saveMapRegion()
-    }
-    
-    func saveMapRegion() {
-        let mapRegion = [
-            "latitude" : mapView.region.center.latitude,
-            "longitude" : mapView.region.center.longitude,
-            "latitudeDelta" : mapView.region.span.latitudeDelta,
-            "longitudeDelta" : mapView.region.span.longitudeDelta
-        ]
-        NSUserDefaults.standardUserDefaults().setObject(mapRegion, forKey: "mapRegion")
-    }
-    
-    func restoreMapRegion() {
-        if let mapRegion = NSUserDefaults.standardUserDefaults().objectForKey("mapRegion") {
-            
-            let longitude = mapRegion["longitude"] as! CLLocationDegrees
-            let latitude = mapRegion["latitude"] as! CLLocationDegrees
-            let center = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
-            
-            let longitudeDelta = mapRegion["latitudeDelta"] as! CLLocationDegrees
-            let latitudeDelta = mapRegion["longitudeDelta"] as! CLLocationDegrees
-            let span = MKCoordinateSpan(latitudeDelta: latitudeDelta, longitudeDelta: longitudeDelta)
-            
-            let savedRegion = MKCoordinateRegion(center: center, span: span)
-            
-            self.mapView.setRegion(savedRegion, animated: false)
+        let fetchRequest = NSFetchRequest(entityName: "MapRegion")
+        do {
+            let fetchedEntity = try sharedContext.executeFetchRequest(fetchRequest) as! [MapRegion]
+            fetchedEntity.first?.lat = mapView.region.center.latitude
+            fetchedEntity.first?.long = mapView.region.center.longitude
+            fetchedEntity.first?.latDelta = mapView.region.span.latitudeDelta
+            fetchedEntity.first?.longDelta = mapView.region.span.longitudeDelta
+            CoreDataStackManager.sharedInstance().saveContext()
+        } catch let error as NSError {
+            print("Error fetching mapRegion on regionDidChangeAnimated: \(error.localizedDescription)")
         }
+    }
+
+    func restoreExistingMapRegion() {
+        let existingMapRegion = fetchExistingMapRegion()
+        
+        print("ExistingMapRegion: \(existingMapRegion)")
+        let center = CLLocationCoordinate2D(latitude: existingMapRegion.lat, longitude: existingMapRegion.long)
+        let span = MKCoordinateSpan(latitudeDelta: existingMapRegion.latDelta, longitudeDelta: existingMapRegion.longDelta)
+        let restoreRegion = MKCoordinateRegion(center: center, span: span)
+        
+        self.mapView.setRegion(restoreRegion, animated: false)
     }
 }

@@ -12,19 +12,18 @@ import MapKit
 
 class Pin: NSManagedObject, MKAnnotation {
     
-    @NSManaged var title: String?
     @NSManaged var latitude: Double
     @NSManaged var longitude: Double
+    @NSManaged var photos: [Photo]
     
     override init(entity: NSEntityDescription, insertIntoManagedObjectContext context: NSManagedObjectContext?) {
         super.init(entity: entity, insertIntoManagedObjectContext: context)
     }
     
-    init(annotationTitle: String, annotationLatitude: Double, annotationLongitude: Double, context: NSManagedObjectContext) {
+    init(annotationLatitude: Double, annotationLongitude: Double, context: NSManagedObjectContext) {
         let entity = NSEntityDescription.entityForName("Pin", inManagedObjectContext: context)!
         super.init(entity: entity, insertIntoManagedObjectContext: context)
        
-        title = annotationTitle
         latitude = annotationLatitude
         longitude = annotationLongitude
         
