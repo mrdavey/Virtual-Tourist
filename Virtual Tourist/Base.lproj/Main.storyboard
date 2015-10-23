@@ -17,11 +17,12 @@
                         <rect key="frame" x="0.0" y="0.0" width="600" height="600"/>
                         <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                         <subviews>
-                            <mapView clipsSubviews="YES" multipleTouchEnabled="YES" contentMode="scaleToFill" misplaced="YES" mapType="standard" translatesAutoresizingMaskIntoConstraints="NO" id="yvr-yO-Xha">
-                                <rect key="frame" x="0.0" y="0.0" width="600" height="600"/>
+                            <mapView clipsSubviews="YES" multipleTouchEnabled="YES" contentMode="scaleToFill" mapType="standard" translatesAutoresizingMaskIntoConstraints="NO" id="yvr-yO-Xha">
+                                <rect key="frame" x="0.0" y="44" width="600" height="556"/>
                                 <animations/>
                                 <gestureRecognizers/>
                                 <connections>
+                                    <outlet property="delegate" destination="BYZ-38-t0r" id="E44-hJ-c0Q"/>
                                     <outletCollection property="gestureRecognizers" destination="3um-hA-g44" appends="YES" id="73W-Hz-sVv"/>
                                 </connections>
                             </mapView>
@@ -93,6 +94,11 @@
                                                     <rect key="frame" x="0.0" y="0.0" width="150" height="150"/>
                                                     <animations/>
                                                 </imageView>
+                                                <activityIndicatorView hidden="YES" opaque="NO" contentMode="scaleToFill" horizontalHuggingPriority="750" verticalHuggingPriority="750" hidesWhenStopped="YES" animating="YES" style="whiteLarge" translatesAutoresizingMaskIntoConstraints="NO" id="pvI-a4-yJ0">
+                                                    <rect key="frame" x="57" y="56" width="37" height="37"/>
+                                                    <animations/>
+                                                    <color key="color" white="0.0" alpha="1" colorSpace="calibratedWhite"/>
+                                                </activityIndicatorView>
                                             </subviews>
                                             <animations/>
                                             <color key="backgroundColor" white="0.0" alpha="0.0" colorSpace="calibratedWhite"/>
@@ -100,17 +106,20 @@
                                         <animations/>
                                         <constraints>
                                             <constraint firstAttribute="trailingMargin" secondItem="tDv-Zt-Qwx" secondAttribute="trailing" constant="-8" id="DIV-pi-AvN"/>
+                                            <constraint firstItem="pvI-a4-yJ0" firstAttribute="centerY" secondItem="cdY-K2-FYL" secondAttribute="centerY" id="K2M-9S-wwZ"/>
                                             <constraint firstAttribute="bottomMargin" secondItem="tDv-Zt-Qwx" secondAttribute="bottom" constant="-8" id="NRE-VO-EJh"/>
                                             <constraint firstItem="tDv-Zt-Qwx" firstAttribute="top" secondItem="cdY-K2-FYL" secondAttribute="topMargin" constant="-8" id="QBj-nG-KSI"/>
                                             <constraint firstItem="tDv-Zt-Qwx" firstAttribute="leading" secondItem="cdY-K2-FYL" secondAttribute="leadingMargin" constant="-8" id="S45-M5-myv"/>
+                                            <constraint firstItem="pvI-a4-yJ0" firstAttribute="centerX" secondItem="cdY-K2-FYL" secondAttribute="centerX" id="WJ2-GQ-KST"/>
                                         </constraints>
                                         <connections>
+                                            <outlet property="activityIndicator" destination="pvI-a4-yJ0" id="aJb-UI-Ku7"/>
                                             <outlet property="imageView" destination="tDv-Zt-Qwx" id="V8K-lE-Tm3"/>
                                         </connections>
                                     </collectionViewCell>
                                 </cells>
                                 <connections>
-                                    <outlet property="dataSource" destination="4ue-PB-kvo" id="vyY-MS-Bu0"/>
+                                    <outlet property="dataSource" destination="4ue-PB-kvo" id="SGX-Xd-e4A"/>
                                     <outlet property="delegate" destination="4ue-PB-kvo" id="zDK-iZ-v6p"/>
                                 </connections>
                             </collectionView>

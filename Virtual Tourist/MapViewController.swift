@@ -13,9 +13,16 @@ import CoreData
 class MapViewController: UIViewController, MKMapViewDelegate, NSFetchedResultsControllerDelegate {
     
     var sharedContext: NSManagedObjectContext { return CoreDataStackManager.sharedInstance().managedObjectContext }
-    var tempContext: NSManagedObjectContext!
+    var privateQueueContext: NSManagedObjectContext { return CoreDataStackManager.sharedInstance().privateQueueContext }
+    var tempPinContext: NSManagedObjectContext!
     
-    var pinAddedViaLongPress: Pin!
+    var pinAddedViaLongPress: Pin! {
+        didSet {
+            CoreDataStackManager.sharedInstance().saveContext()
+            print("ObjectID didSet: \(self.pinAddedViaLongPress.objectID)")
+        }
+    }
+    var privatePinAdded: Pin!
     var pins: [Pin]?
     var tempPin: Pin!
     
@@ -26,22 +33,25 @@ class MapViewController: UIViewController, MKMapViewDelegate, NSFetchedResultsCo
         
         // Start the fetched results controller
         do {
-            try fetchedResultsController.performFetch()
+            try self.fetchedResultsController.performFetch()
         } catch let error as NSError {
             print("Error performing initial fetch: \(error.localizedDescription)")
         }
         
-        self.pins = fetchAllObjects()
-        self.mapView.addAnnotations(pins!)
+        self.pins = self.fetchAllObjects()
+        self.mapView.addAnnotations(self.pins!)
         
         self.mapView.delegate = self
-        fetchedResultsController.delegate = self
-        restoreExistingMapRegion()
+        self.fetchedResultsController.delegate = self
+        self.restoreExistingMapRegion()
         
+        tempPinContext = NSManagedObjectContext(concurrencyType: NSManagedObjectContextConcurrencyType.MainQueueConcurrencyType)
+        tempPinContext.persistentStoreCoordinator = sharedContext.persistentStoreCoordinator
         
-
-        tempContext = NSManagedObjectContext(concurrencyType: NSManagedObjectContextConcurrencyType.MainQueueConcurrencyType)
-        tempContext.persistentStoreCoordinator = sharedContext.persistentStoreCoordinator
+    }
+    
+    override func viewDidAppear(animated: Bool) {
+        CoreDataStackManager.sharedInstance().saveContext()
     }
     
     @IBAction func userLongPressedMapView(sender: UILongPressGestureRecognizer) {
@@ -49,27 +59,28 @@ class MapViewController: UIViewController, MKMapViewDelegate, NSFetchedResultsCo
         let tapPointCoordinate = mapView.convertPoint(tapPoint, toCoordinateFromView: self.mapView)
         
         if sender.state == UIGestureRecognizerState.Began {
-            tempPin = Pin(annotationLatitude: tapPointCoordinate.latitude, annotationLongitude: tapPointCoordinate.longitude, context: self.tempContext)
-            self.mapView.addAnnotation(tempPin)
+            self.tempPin = Pin(annotationLatitude: tapPointCoordinate.latitude, annotationLongitude: tapPointCoordinate.longitude, context: self.tempPinContext)
+            self.mapView.addAnnotation(self.tempPin)
         } else if sender.state == UIGestureRecognizerState.Changed {
-            tempPin.coordinate = tapPointCoordinate
+            self.tempPin.coordinate = tapPointCoordinate
         } else if sender.state == UIGestureRecognizerState.Ended {
-            tempPin.coordinate = tapPointCoordinate
+            self.tempPin.coordinate = tapPointCoordinate
             UIView.animateWithDuration(0.5) {
                 self.mapView.centerCoordinate = self.tempPin.coordinate
             }
-            
             self.preFetchFlickerImages()
+            CoreDataStackManager.sharedInstance().saveContext()
         }
+        
     }
     
     // MARK: - Fetch data
+    
     func preFetchFlickerImages() {
         print("Running preFetchFlickrImages")
         UIApplication.sharedApplication().networkActivityIndicatorVisible = true
-        
         // Check if any photos in that location
-        FlickrClient.sharedInstance().getImagesFromFlickrBySearch(tempPin.coordinate.latitude, longitude: tempPin.coordinate.longitude) { result, error in
+        FlickrClient.sharedInstance().getImageFromFlickrBySearch(tempPin.coordinate.latitude, longitude: tempPin.coordinate.longitude) { result, error in
             
             guard (error == nil) else {
                 // TODO: - Show error
@@ -80,25 +91,37 @@ class MapViewController: UIViewController, MKMapViewDelegate, NSFetchedResultsCo
                 UIApplication.sharedApplication().networkActivityIndicatorVisible = false
                 return
             }
-            self.pinAddedViaLongPress = Pin(annotationLatitude: self.tempPin.coordinate.latitude, annotationLongitude: self.tempPin.coordinate.longitude, context: self.sharedContext)
-            dispatch_async(dispatch_get_main_queue()) {
-                self.mapView.addAnnotation(self.pinAddedViaLongPress)
+            
+            self.sharedContext.performBlockAndWait() {
+                self.pinAddedViaLongPress = Pin(annotationLatitude: self.tempPin.coordinate.latitude, annotationLongitude: self.tempPin.coordinate.longitude, context: self.sharedContext)
+                print("created Pin")
                 self.mapView.removeAnnotation(self.tempPin)
+                self.mapView.addAnnotation(self.pinAddedViaLongPress)
+                
             }
             
             if let photosDictionary = result?.valueForKey("photo") as? [[String : AnyObject]] {
+                
                 //Parse the dict
                 if photosDictionary.count > 0 {
                     print("PhotoDictionary Count: \(photosDictionary.count)")
                     var photoCount = 1
-                    let _ = photosDictionary.map() { (dictionary: [String: AnyObject]) -> Photo in
-                        let photo = Photo(dictionary: dictionary, context: self.sharedContext)
-                        
-                        let imageData = NSData(contentsOfURL: NSURL(string: photo.url_q)!)
-                        photo.urlImage = UIImage(data: imageData!)
-                        photo.pin = self.pinAddedViaLongPress
-                        print("photoCount: \(photoCount++)")
-                        return photo
+                    
+                    self.privateQueueContext.performBlock() {
+                        do {
+                            self.privatePinAdded = try self.privateQueueContext.existingObjectWithID(self.pinAddedViaLongPress.objectID) as! Pin
+                        } catch {
+                            print("Error setting privatePin: \(error)")
+                        }
+                        let _ = photosDictionary.map() { (dictionary: [String: AnyObject]) -> Photo in
+                            let photo = Photo(dictionary: dictionary, context: self.privateQueueContext)
+                            photo.pin = self.privatePinAdded
+                            let imageData = NSData(contentsOfURL: NSURL(string: photo.url_q)!)
+                            photo.urlImage = UIImage(data: imageData!)
+                            print("photoCount: \(photoCount++)")
+                            return photo
+                        }
+                        CoreDataStackManager.sharedInstance().savePrivateContext()
                     }
                     CoreDataStackManager.sharedInstance().saveContext()
                 }
@@ -151,7 +174,7 @@ class MapViewController: UIViewController, MKMapViewDelegate, NSFetchedResultsCo
         return fetchedResultsController
         }()
     
-
+    
     // MARK: - MapView Delegates
     
     // Annotations setup
@@ -173,16 +196,15 @@ class MapViewController: UIViewController, MKMapViewDelegate, NSFetchedResultsCo
         self.mapView.deselectAnnotation(view.annotation, animated: false)
         
         let controller = storyboard!.instantiateViewControllerWithIdentifier("PhotosCollectionViewController") as! PhotosCollectionViewController
-
+        
         let selectedPin = view.annotation as! Pin
         controller.pin = selectedPin
-        controller.restoreMapRegion = fetchExistingMapRegion()
-        controller.numberOfPhotos = selectedPin.photos.count
+        controller.restoreMapRegion = self.fetchExistingMapRegion()
         
-        print("MapVC, selectedPin photoCount: \(selectedPin.photos.count)")
+        print("Selecting annotation view")
         self.navigationController!.pushViewController(controller, animated: true)
     }
-
+    
     func mapView(mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
         let fetchRequest = NSFetchRequest(entityName: "MapRegion")
         do {
@@ -196,11 +218,9 @@ class MapViewController: UIViewController, MKMapViewDelegate, NSFetchedResultsCo
             print("Error fetching mapRegion on regionDidChangeAnimated: \(error.localizedDescription)")
         }
     }
-
+    
     func restoreExistingMapRegion() {
         let existingMapRegion = fetchExistingMapRegion()
-        
-        print("ExistingMapRegion: \(existingMapRegion)")
         let center = CLLocationCoordinate2D(latitude: existingMapRegion.lat, longitude: existingMapRegion.long)
         let span = MKCoordinateSpan(latitudeDelta: existingMapRegion.latDelta, longitudeDelta: existingMapRegion.longDelta)
         let restoreRegion = MKCoordinateRegion(center: center, span: span)

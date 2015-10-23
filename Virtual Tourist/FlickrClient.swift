@@ -16,20 +16,101 @@ class FlickrClient: NSObject {
         super.init()
     }
     
-    func getImagesFromFlickrBySearch(latitude: Double, longitude: Double, completionHandler: (result: AnyObject?, error: String?) -> Void) {
+    func getImageFromFlickrBySearch(latitude: Double, longitude: Double, completionHandler: (result: AnyObject?, error: String?) -> Void) {
+        print("flickr search")
         let methodArguments = [
             "method": FlickrClient.Constants.METHOD_NAME,
             "api_key": FlickrClient.Constants.API_KEY,
             "bbox": createBoundingBoxString(latitude: latitude, longitude: longitude),
             "safe_search": FlickrClient.Constants.SAFE_SEARCH,
             "extras": FlickrClient.Constants.EXTRAS,
-            "per_page": FlickrClient.Constants.PERPAGE,
-            "page": FlickrClient.Constants.PAGE,
             "format": FlickrClient.Constants.DATA_FORMAT,
-            "nojsoncallback": FlickrClient.Constants.NO_JSON_CALLBACK
+            "nojsoncallback": FlickrClient.Constants.NO_JSON_CALLBACK,
+            "per_page": FlickrClient.Constants.PERPAGE,
+            "sort": FlickrClient.Constants.SORT
         ]
-
+        
         let urlString = FlickrClient.Constants.BASE_URL + escapedParameters(methodArguments)
+        let url = NSURL(string: urlString)!
+        let request = NSURLRequest(URL: url)
+        
+        let task = session.dataTaskWithRequest(request) { (data, response, error) in
+            
+            /* GUARD: Was there an error? */
+            guard (error == nil) else {
+                let errorMessage = "There was an error with your request: \(error)"
+                completionHandler(result: nil, error: errorMessage)
+                return
+            }
+            
+            /* GUARD: Did we get a successful 2XX response? */
+            guard let statusCode = (response as? NSHTTPURLResponse)?.statusCode where statusCode >= 200 && statusCode <= 299 else {
+                var errorMessage: String
+                if let response = response as? NSHTTPURLResponse {
+                    errorMessage = "Your request returned an invalid response! Status code: \(response.statusCode)!"
+                } else if let response = response {
+                    errorMessage = "Your request returned an invalid response! Response: \(response)!"
+                } else {
+                    errorMessage = "Your request returned an invalid response!"
+                }
+                completionHandler(result: nil, error: errorMessage)
+                return
+            }
+            
+            /* GUARD: Was there any data returned? */
+            guard let data = data else {
+                let errorMessage = "No data was returned by the request!"
+                completionHandler(result: nil, error: errorMessage)
+                return
+            }
+            
+            /* Parse the data! */
+            let parsedResult: AnyObject!
+            do {
+                parsedResult = try NSJSONSerialization.JSONObjectWithData(data, options: .AllowFragments)
+            } catch {
+                parsedResult = nil
+                let errorMessage = "Could not parse the data as JSON: '\(data)'"
+                completionHandler(result: nil, error: errorMessage)
+                return
+            }
+            
+            /* GUARD: Did Flickr return an error? */
+            guard let stat = parsedResult["stat"] as? String where stat == "ok" else {
+                let errorMessage = "Flickr API returned an error. See error code and message in \(parsedResult)"
+                completionHandler(result: nil, error: errorMessage)
+                return
+            }
+            
+            /* GUARD: Is "photos" key in our result? */
+            guard let photosDictionary = parsedResult["photos"] as? NSDictionary else {
+                let errorMessage = "Cannot find keys 'photos' in \(parsedResult)"
+                completionHandler(result: nil, error: errorMessage)
+                return
+            }
+            
+            /* GUARD: Is "pages" key in the photosDictionary? */
+            guard let totalPages = photosDictionary["pages"] as? Int else {
+                let errorMessage = "Cannot find key 'pages' in \(photosDictionary)"
+                completionHandler(result: nil, error: errorMessage)
+                return
+            }
+            
+            /* Pick a random page! */
+            let pageLimit = min(totalPages, 40) // Flickr API returns max of 4000 results
+            let randomPage = Int(arc4random_uniform(UInt32(pageLimit))) + 1
+            FlickrClient.sharedInstance().getImagesFromFlickrBySearchWithPage(methodArguments, pageNumber: randomPage, completionHandler: completionHandler)
+        }
+        
+        task.resume()
+    }
+    
+    func getImagesFromFlickrBySearchWithPage(methodArguments: [String: AnyObject], pageNumber: Int, completionHandler: (result: AnyObject?, error: String?) -> Void) {
+
+        var withPageDictionary = methodArguments
+        withPageDictionary["page"] = pageNumber
+        
+        let urlString = FlickrClient.Constants.BASE_URL + escapedParameters(withPageDictionary)
         let url = NSURL(string: urlString)!
         let request = NSURLRequest(URL: url)
         

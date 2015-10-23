@@ -31,11 +31,15 @@ class Photo: NSManagedObject {
     
     var urlImage: UIImage? {
         get {
-            return FlickrClient.Caches.imageCache.imageWithIdentifier(url_q)
+            return FlickrClient.Caches.imageCache.imageWithIdentifier("\(id)")
         }
         
         set {
-            FlickrClient.Caches.imageCache.storeImage(newValue, withIdentifier: url_q)
+            FlickrClient.Caches.imageCache.storeImage(newValue, withIdentifier: "\(id)")
         }
+    }
+    
+    override func prepareForDeletion() {
+        urlImage = nil
     }
 }

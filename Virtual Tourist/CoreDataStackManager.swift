@@ -107,20 +107,42 @@ class CoreDataStackManager {
         return managedObjectContext
         }()
     
+    lazy var privateQueueContext: NSManagedObjectContext = {
+        let privateMOC = NSManagedObjectContext(concurrencyType: .PrivateQueueConcurrencyType)
+        privateMOC.persistentStoreCoordinator = self.persistentStoreCoordinator
+        
+        return privateMOC
+    }()
+   
     // MARK: - Core Data Saving support
     
     func saveContext () {
-        if managedObjectContext.hasChanges {
-            do {
-                try managedObjectContext.save()
-            } catch {
-                // Replace this implementation with code to handle the error appropriately.
-                // abort() causes the application to generate a crash log and terminate. You should not use this function in a shipping application, although it may be useful during development.
-                let nserror = error as NSError
-                NSLog("Unresolved error \(nserror), \(nserror.userInfo)")
-                abort()
+        managedObjectContext.performBlock() {
+            if self.managedObjectContext.hasChanges {
+                do {
+                    try self.managedObjectContext.save()
+                    print("main context saved")
+                } catch {
+                    // Replace this implementation with code to handle the error appropriately.
+                    // abort() causes the application to generate a crash log and terminate. You should not use this function in a shipping application, although it may be useful during development.
+                    let nserror = error as NSError
+                    NSLog("Unresolved error in managedObjectContext.saveContext: \(nserror.localizedDescription), \(nserror.userInfo)")
+                    abort()
+                }
             }
         }
+    }
+    
+    func savePrivateContext () {
+        privateQueueContext.performBlock() {
+            do {
+                try self.privateQueueContext.save()
+                print("privateQueue saved")
+            } catch let error as NSError {
+                print("Error saving privateContext: \(error.localizedDescription)")
+            }
+        }
+        
     }
 }
 
