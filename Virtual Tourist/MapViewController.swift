@@ -25,6 +25,8 @@ class MapViewController: UIViewController, MKMapViewDelegate, NSFetchedResultsCo
     var privatePinAdded: Pin!
     var pins: [Pin]?
     var tempPin: Pin!
+    var numberOfPhotos: Int?
+    var preFetchCompleted: Bool = false
     
     @IBOutlet weak var mapView: MKMapView!
     
@@ -97,33 +99,32 @@ class MapViewController: UIViewController, MKMapViewDelegate, NSFetchedResultsCo
                 print("created Pin")
                 self.mapView.removeAnnotation(self.tempPin)
                 self.mapView.addAnnotation(self.pinAddedViaLongPress)
-                
+                CoreDataStackManager.sharedInstance().saveContext()
             }
             
             if let photosDictionary = result?.valueForKey("photo") as? [[String : AnyObject]] {
-                
+                self.numberOfPhotos = photosDictionary.count
                 //Parse the dict
                 if photosDictionary.count > 0 {
-                    print("PhotoDictionary Count: \(photosDictionary.count)")
-                    var photoCount = 1
-                    
-                    self.privateQueueContext.performBlock() {
+                    self.privateQueueContext.performBlockAndWait() {
                         do {
                             self.privatePinAdded = try self.privateQueueContext.existingObjectWithID(self.pinAddedViaLongPress.objectID) as! Pin
                         } catch {
                             print("Error setting privatePin: \(error)")
+                            dispatch_async(dispatch_get_main_queue()) {
+                                self.mapView.removeAnnotation(self.tempPin)
+                            }
+                            UIApplication.sharedApplication().networkActivityIndicatorVisible = false
+                            return
                         }
                         let _ = photosDictionary.map() { (dictionary: [String: AnyObject]) -> Photo in
                             let photo = Photo(dictionary: dictionary, context: self.privateQueueContext)
                             photo.pin = self.privatePinAdded
-                            let imageData = NSData(contentsOfURL: NSURL(string: photo.url_q)!)
-                            photo.urlImage = UIImage(data: imageData!)
-                            print("photoCount: \(photoCount++)")
                             return photo
                         }
                         CoreDataStackManager.sharedInstance().savePrivateContext()
+                        self.preFetchCompleted = true
                     }
-                    CoreDataStackManager.sharedInstance().saveContext()
                 }
                 UIApplication.sharedApplication().networkActivityIndicatorVisible = false
             } else {
@@ -200,6 +201,18 @@ class MapViewController: UIViewController, MKMapViewDelegate, NSFetchedResultsCo
         let selectedPin = view.annotation as! Pin
         controller.pin = selectedPin
         controller.restoreMapRegion = self.fetchExistingMapRegion()
+        
+        if let photosDownloaded = numberOfPhotos {
+            controller.numberOfPhotos = photosDownloaded
+        } else {
+            controller.numberOfPhotos = controller.pin.photos.count
+        }
+        
+        if preFetchCompleted == true {
+            controller.preFetchedPhotos = true
+        } else {
+            controller.preFetchedPhotos = false
+        }
         
         print("Selecting annotation view")
         self.navigationController!.pushViewController(controller, animated: true)

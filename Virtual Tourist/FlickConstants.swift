@@ -17,7 +17,7 @@ extension FlickrClient {
         
         static let SORT = "date-posted-desc"
         static let EXTRAS = "url_q"
-        static let PERPAGE = "10" // Max out at 25 for now..
+        static let PERPAGE = "25" // Max out at 25 for now..
         static let SAFE_SEARCH = "1"
         static let DATA_FORMAT = "json"
         static let NO_JSON_CALLBACK = "1"

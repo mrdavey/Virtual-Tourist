@@ -38,6 +38,7 @@ class PhotosCollectionViewController: UIViewController, UICollectionViewDataSour
     var pinPrivateQueue: Pin!
     var restoreMapRegion: MapRegion!
     var numberOfPhotos: Int!
+    var preFetchedPhotos: Bool!
     
     @IBOutlet weak var mapView: MKMapView!
     @IBOutlet weak var collectionView: UICollectionView!
@@ -49,7 +50,6 @@ class PhotosCollectionViewController: UIViewController, UICollectionViewDataSour
         super.viewDidLoad()
         
         fetchedResultsController.delegate = self
-        
     }
     
     override func viewWillAppear(animated: Bool) {
@@ -57,6 +57,9 @@ class PhotosCollectionViewController: UIViewController, UICollectionViewDataSour
         self.mapView.addAnnotation(pin)
         self.restoreExistingMapRegion()
         networkActivityIndicator()
+        if preFetchedPhotos == false {
+            self.reloadPhotos()
+        }
     }
     
     override func viewDidLayoutSubviews() {
@@ -219,8 +222,6 @@ class PhotosCollectionViewController: UIViewController, UICollectionViewDataSour
                         }
                         let _ = photosDictionary.map() { (dictionary: [String: AnyObject]) -> Photo in
                             let photo = Photo(dictionary: dictionary, context: self.privateQueueContext)
-                            let imageData = NSData(contentsOfURL: NSURL(string: photo.url_q)!)
-                            photo.urlImage = UIImage(data: imageData!)
                             photo.pin = self.pinPrivateQueue
                             print("photoCount: \(photoCount++), numberOfPhotos: \(self.numberOfPhotos)")
                             return photo
@@ -228,6 +229,8 @@ class PhotosCollectionViewController: UIViewController, UICollectionViewDataSour
                         CoreDataStackManager.sharedInstance().savePrivateContext()
                         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, Int64(0.5 * Double(NSEC_PER_SEC))), dispatch_get_main_queue()) { () -> Void in
                             self.networkActivityIndicator()
+                            self.performFetch()
+                            self.collectionView.reloadData()
                         }
                         UIApplication.sharedApplication().networkActivityIndicatorVisible = false
                     }
@@ -253,9 +256,8 @@ class PhotosCollectionViewController: UIViewController, UICollectionViewDataSour
         for photo in self.fetchedResultsController.fetchedObjects as! [Photo] {
             self.sharedContext.deleteObject(photo)
         }
-        //numberOfPhotos = 0
+        numberOfPhotos = 0
     }
-    
     
     func deleteSelectedPhotos() {
         var photosToDelete = [Photo]()
@@ -314,14 +316,21 @@ class PhotosCollectionViewController: UIViewController, UICollectionViewDataSour
         let count = sectionInfo.numberOfObjects
         
         print("PhotosCollectionVC count: \(sectionInfo.numberOfObjects)")
-        numberOfPhotos = count
-        if count == 0 {
+        print("numberOfphotos: \(numberOfPhotos)")
+        if count == 0 && numberOfPhotos == 0 {
+            print("1: count 0, numberOfPhotos 0")
             self.noImagesLabel.hidden = false
-        } else {
+            return 0
+        } else if count == 0 && numberOfPhotos > 0 {
+            // Prefetched number of photos known, not yet saved to CoreData
+            print("2: count 0, numberOfPhotos: \(numberOfPhotos)")
             self.noImagesLabel.hidden = true
+            return numberOfPhotos
+        } else {
+            print("3: numberOfPhotos: \(numberOfPhotos)")
+            self.noImagesLabel.hidden = true
+            return count
         }
-        
-        return count
     }
     
     func collectionView(collectionView: UICollectionView, cellForItemAtIndexPath indexPath: NSIndexPath) -> UICollectionViewCell {
@@ -356,11 +365,10 @@ class PhotosCollectionViewController: UIViewController, UICollectionViewDataSour
     func configureCell(cell: PhotosCollectionViewCell, atIndexPath indexPath: NSIndexPath) {
         cell.activityIndicator.stopAnimating()
         var photoImage = UIImage(named: "defaultImage")!
+        let fetchResultsCount = self.fetchedResultsController.fetchedObjects!.count ?? 0
         
         self.sharedContext.performBlock() {
-            
-            let fetchResultsCount = self.fetchedResultsController.fetchedObjects!.count ?? 0
-            //print("indexPath.row \(indexPath.row) < fetchedResults.count \(fetchResultsCount)")
+            print("indexPath.row \(indexPath.row) < numberOfPhotos: \(self.numberOfPhotos), pin.photos.count \(self.pin.photos.count), fetchResultsCount: \(fetchResultsCount)")
             if indexPath.row < self.numberOfPhotos && fetchResultsCount != 0 {
                 let photo = self.fetchedResultsController.objectAtIndexPath(indexPath) as! Photo
                 if photo.urlImage == nil {
@@ -376,7 +384,6 @@ class PhotosCollectionViewController: UIViewController, UICollectionViewDataSour
                             dispatch_async(dispatch_get_main_queue()) {
                                 // update the model, so that the information gets cached
                                 photo.urlImage = image
-                                
                                 // update the cell later, on the main thread
                                 cell.imageView!.image = image
                             }
@@ -386,8 +393,8 @@ class PhotosCollectionViewController: UIViewController, UICollectionViewDataSour
                 } else {
                     photoImage = photo.urlImage!
                 }
+                self.saveContext()
             }
-            self.saveContext()
         }
         
         dispatch_async(dispatch_get_main_queue()){
