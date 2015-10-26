@@ -28,7 +28,9 @@ class MapViewController: UIViewController, MKMapViewDelegate, NSFetchedResultsCo
     var numberOfPhotos: Int?
     var preFetchCompleted: Bool = false
     
+    @IBOutlet weak var mapActivityIndicator: UIActivityIndicatorView!
     @IBOutlet weak var mapView: MKMapView!
+    @IBOutlet weak var blurView: UIVisualEffectView!
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -42,6 +44,8 @@ class MapViewController: UIViewController, MKMapViewDelegate, NSFetchedResultsCo
         
         self.pins = self.fetchAllObjects()
         self.mapView.addAnnotations(self.pins!)
+        self.blurView.hidden = false
+        self.blurView.alpha = 0
         
         self.mapView.delegate = self
         self.fetchedResultsController.delegate = self
@@ -63,17 +67,32 @@ class MapViewController: UIViewController, MKMapViewDelegate, NSFetchedResultsCo
         if sender.state == UIGestureRecognizerState.Began {
             self.tempPin = Pin(annotationLatitude: tapPointCoordinate.latitude, annotationLongitude: tapPointCoordinate.longitude, context: self.tempPinContext)
             self.mapView.addAnnotation(self.tempPin)
+
         } else if sender.state == UIGestureRecognizerState.Changed {
             self.tempPin.coordinate = tapPointCoordinate
         } else if sender.state == UIGestureRecognizerState.Ended {
             self.tempPin.coordinate = tapPointCoordinate
+            self.showBlurView(true)
+            self.preFetchFlickerImages()
+            self.mapActivityIndicator.startAnimating()
+            self.mapView.removeAnnotation(self.tempPin)
+            CoreDataStackManager.sharedInstance.saveContext()
             UIView.animateWithDuration(0.5) {
                 self.mapView.centerCoordinate = self.tempPin.coordinate
             }
-            self.preFetchFlickerImages()
-            CoreDataStackManager.sharedInstance.saveContext()
         }
-        
+    }
+    
+    func showBlurView(show: Bool) {
+        if show == true {
+            UIView.animateWithDuration(0.5) {
+                self.blurView.alpha = 1
+            }
+        } else {
+            UIView.animateWithDuration(0.5) {
+                self.blurView.alpha = 0
+            }
+        }
     }
     
     // MARK: - Fetch data
@@ -87,7 +106,9 @@ class MapViewController: UIViewController, MKMapViewDelegate, NSFetchedResultsCo
             guard (error == nil) else {
                 // TODO: - Show error
                 dispatch_async(dispatch_get_main_queue()) {
-                    self.mapView.removeAnnotation(self.tempPin)
+                    //self.mapView.removeAnnotation(self.tempPin)
+                    self.mapActivityIndicator.stopAnimating()
+                    self.showBlurView(false)
                 }
                 print("Error occured \(error!)")
                 UIApplication.sharedApplication().networkActivityIndicatorVisible = false
@@ -97,7 +118,8 @@ class MapViewController: UIViewController, MKMapViewDelegate, NSFetchedResultsCo
             self.sharedContext.performBlockAndWait() {
                 self.pinAddedViaLongPress = Pin(annotationLatitude: self.tempPin.coordinate.latitude, annotationLongitude: self.tempPin.coordinate.longitude, context: self.sharedContext)
                 print("created Pin")
-                self.mapView.removeAnnotation(self.tempPin)
+                self.mapActivityIndicator.stopAnimating()
+                self.showBlurView(false)
                 self.mapView.addAnnotation(self.pinAddedViaLongPress)
                 CoreDataStackManager.sharedInstance.saveContext()
             }
@@ -112,7 +134,9 @@ class MapViewController: UIViewController, MKMapViewDelegate, NSFetchedResultsCo
                         } catch {
                             print("Error setting privatePin: \(error)")
                             dispatch_async(dispatch_get_main_queue()) {
-                                self.mapView.removeAnnotation(self.tempPin)
+                                //self.mapView.removeAnnotation(self.tempPin)
+                                self.mapActivityIndicator.stopAnimating()
+                                self.showBlurView(false)
                             }
                             UIApplication.sharedApplication().networkActivityIndicatorVisible = false
                             return
@@ -129,6 +153,8 @@ class MapViewController: UIViewController, MKMapViewDelegate, NSFetchedResultsCo
                 UIApplication.sharedApplication().networkActivityIndicatorVisible = false
             } else {
                 UIApplication.sharedApplication().networkActivityIndicatorVisible = false
+                self.mapActivityIndicator.stopAnimating()
+                self.showBlurView(false)
                 // TODO: - error message
                 print("0 photos returned")
             }

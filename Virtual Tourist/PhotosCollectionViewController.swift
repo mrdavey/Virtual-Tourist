@@ -66,6 +66,9 @@ class PhotosCollectionViewController: UIViewController, UICollectionViewDataSour
             } else if preFetchedPhotos == false && fetchedObjects != 0 {
                 print("Opening pin that has already downloaded photos")
                 self.numberOfPhotos = self.fetchedResultsController.fetchedObjects!.count
+            } else if preFetchedPhotos == true && fetchedObjects == 0 {
+                print("prefetched true, fetchedObjects 0")
+                self.collectionView.reloadData()
             }
         } else {
             print("fetchObjects is nil: \(self.fetchedResultsController.fetchedObjects?.count)")
@@ -213,6 +216,7 @@ class PhotosCollectionViewController: UIViewController, UICollectionViewDataSour
                     self.numberOfPhotos = photosDictionary.count
                     var photoCount = 1
                     print("\(self.numberOfPhotos) photos found")
+                    
                     self.privateQueueContext.performBlock(){
                         do {
                             self.pinPrivateQueue = try self.privateQueueContext.existingObjectWithID(self.pin.objectID) as! Pin
