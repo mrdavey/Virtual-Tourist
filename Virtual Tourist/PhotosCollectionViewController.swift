@@ -19,7 +19,7 @@ private let reuseIdentifier = "Cell"
 
 class PhotosCollectionViewController: UIViewController, UICollectionViewDataSource, UICollectionViewDelegate, NSFetchedResultsControllerDelegate {
     
-    var privateQueueContext: NSManagedObjectContext { return CoreDataStackManager.sharedInstance().privateQueueContext }
+    var privateQueueContext: NSManagedObjectContext { return CoreDataStackManager.sharedInstance.privateQueueContext }
     
     // Keep track of the 'selected' photos
     var selectedIndexes = [NSIndexPath]()
@@ -31,7 +31,7 @@ class PhotosCollectionViewController: UIViewController, UICollectionViewDataSour
     
     var pin: Pin! {
         didSet {
-            CoreDataStackManager.sharedInstance().saveContext()
+            CoreDataStackManager.sharedInstance.saveContext()
             print("ObjectID didSet: \(self.pin.objectID)")
         }
     }
@@ -57,9 +57,20 @@ class PhotosCollectionViewController: UIViewController, UICollectionViewDataSour
         self.mapView.addAnnotation(pin)
         self.restoreExistingMapRegion()
         networkActivityIndicator()
-        if preFetchedPhotos == false {
-            self.reloadPhotos()
+        
+        if let fetchedObjects = self.fetchedResultsController.fetchedObjects?.count {
+            print("fetchedObjects.count: \(fetchedObjects)")
+            if preFetchedPhotos == false  && fetchedObjects == 0 {
+                print("Need to fetch and download images")
+                self.reloadPhotos()
+            } else if preFetchedPhotos == false && fetchedObjects != 0 {
+                print("Opening pin that has already downloaded photos")
+                self.numberOfPhotos = self.fetchedResultsController.fetchedObjects!.count
+            }
+        } else {
+            print("fetchObjects is nil: \(self.fetchedResultsController.fetchedObjects?.count)")
         }
+        
     }
     
     override func viewDidLayoutSubviews() {
@@ -110,7 +121,6 @@ class PhotosCollectionViewController: UIViewController, UICollectionViewDataSour
         deletedIndexPaths = [NSIndexPath]()
         updatedIndexPaths = [NSIndexPath]()
         
-        print("in controllerWillChangeContent")
     }
     
     func controller(controller: NSFetchedResultsController, didChangeObject anObject: AnyObject, atIndexPath indexPath: NSIndexPath?, forChangeType type: NSFetchedResultsChangeType, newIndexPath: NSIndexPath?) {
@@ -136,14 +146,6 @@ class PhotosCollectionViewController: UIViewController, UICollectionViewDataSour
     }
     
     func controllerDidChangeContent(controller: NSFetchedResultsController) {
-        print("in controllerDidChangeContent. changes.count: \(insertedIndexPaths.count + deletedIndexPaths.count)")
-        print("fetchedResultsController items: \(self.fetchedResultsController.fetchedObjects!.count)")
-        
-        //        guard (self.fetchedResultsController.fetchedObjects!.count > 0) else {
-        //            print("no items in fetchedResultsController")
-        //            return
-        //        }
-        
         self.collectionView.performBatchUpdates({() -> Void in
             
             if self.insertedIndexPaths.count > 0 {
@@ -183,20 +185,17 @@ class PhotosCollectionViewController: UIViewController, UICollectionViewDataSour
             if self.selectedIndexes.isEmpty {
                 self.networkActivityIndicator()
                 self.deleteAllPhotos()
-                print("all photos deleted")
                 self.reloadPhotos()
             } else {
                 self.deleteSelectedPhotos()
             }
             self.saveContext()
-            print("delete finished. Pin count: \(self.pin.objectID)")
         }
     }
     
     func reloadPhotos() {
-        print("reloadPhotos")
         UIApplication.sharedApplication().networkActivityIndicatorVisible = true
-        FlickrClient.sharedInstance().getImageFromFlickrBySearch(pin.latitude, longitude: pin.longitude) { result, error in
+        FlickrClient.sharedInstance.getImageFromFlickrBySearch(pin.latitude, longitude: pin.longitude) { result, error in
             print("getImagesFromFlickr")
             guard (error == nil) else {
                 // TODO: - Show error
@@ -226,7 +225,7 @@ class PhotosCollectionViewController: UIViewController, UICollectionViewDataSour
                             print("photoCount: \(photoCount++), numberOfPhotos: \(self.numberOfPhotos)")
                             return photo
                         }
-                        CoreDataStackManager.sharedInstance().savePrivateContext()
+                        CoreDataStackManager.sharedInstance.savePrivateContext()
                         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, Int64(0.5 * Double(NSEC_PER_SEC))), dispatch_get_main_queue()) { () -> Void in
                             self.networkActivityIndicator()
                             self.performFetch()
@@ -252,7 +251,6 @@ class PhotosCollectionViewController: UIViewController, UICollectionViewDataSour
     }
     
     func deleteAllPhotos() {
-        print("count of photos before delete: \(self.fetchedResultsController.fetchedObjects?.count)")
         for photo in self.fetchedResultsController.fetchedObjects as! [Photo] {
             self.sharedContext.deleteObject(photo)
         }
@@ -284,10 +282,12 @@ class PhotosCollectionViewController: UIViewController, UICollectionViewDataSour
     
     func networkActivityIndicator() {
         if UIApplication.sharedApplication().networkActivityIndicatorVisible == true {
+            self.noImagesLabel.text = "Loading new images..."
             self.bottomButton.title = ""
             self.bottomButton.enabled = false
             self.activityIndicator.startAnimating()
         } else {
+            self.noImagesLabel.text = "No Images"
             self.bottomButton.title = "New Collection"
             self.bottomButton.enabled = true
             self.activityIndicator.stopAnimating()
@@ -297,11 +297,11 @@ class PhotosCollectionViewController: UIViewController, UICollectionViewDataSour
     // MARK: - Core Data Convenience
     
     lazy var sharedContext: NSManagedObjectContext =  {
-        return CoreDataStackManager.sharedInstance().managedObjectContext
+        return CoreDataStackManager.sharedInstance.managedObjectContext
         }()
     
     func saveContext() {
-        CoreDataStackManager.sharedInstance().saveContext()
+        CoreDataStackManager.sharedInstance.saveContext()
     }
     
     
@@ -314,20 +314,15 @@ class PhotosCollectionViewController: UIViewController, UICollectionViewDataSour
     func collectionView(collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
         let sectionInfo = self.fetchedResultsController.sections![section]
         let count = sectionInfo.numberOfObjects
-        
-        print("PhotosCollectionVC count: \(sectionInfo.numberOfObjects)")
-        print("numberOfphotos: \(numberOfPhotos)")
+
         if count == 0 && numberOfPhotos == 0 {
-            print("1: count 0, numberOfPhotos 0")
             self.noImagesLabel.hidden = false
             return 0
         } else if count == 0 && numberOfPhotos > 0 {
             // Prefetched number of photos known, not yet saved to CoreData
-            print("2: count 0, numberOfPhotos: \(numberOfPhotos)")
             self.noImagesLabel.hidden = true
             return numberOfPhotos
         } else {
-            print("3: numberOfPhotos: \(numberOfPhotos)")
             self.noImagesLabel.hidden = true
             return count
         }
@@ -368,15 +363,13 @@ class PhotosCollectionViewController: UIViewController, UICollectionViewDataSour
         let fetchResultsCount = self.fetchedResultsController.fetchedObjects!.count ?? 0
         
         self.sharedContext.performBlock() {
-            print("indexPath.row \(indexPath.row) < numberOfPhotos: \(self.numberOfPhotos), pin.photos.count \(self.pin.photos.count), fetchResultsCount: \(fetchResultsCount)")
             if indexPath.row < self.numberOfPhotos && fetchResultsCount != 0 {
                 let photo = self.fetchedResultsController.objectAtIndexPath(indexPath) as! Photo
                 if photo.urlImage == nil {
-                    _ = FlickrClient.sharedInstance().taskForImage(photo.url_q) { data, error in
+                    _ = FlickrClient.sharedInstance.taskForImage(photo.url_q) { data, error in
                         if let error = error {
                             print("Image download error: \(error.localizedDescription)")
                         }
-                        print("Photo.urlImage was nil, so downloading...")
                         if let data = data {
                             // Create the image
                             let image = UIImage(data: data)

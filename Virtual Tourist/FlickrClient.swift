@@ -99,7 +99,7 @@ class FlickrClient: NSObject {
             /* Pick a random page! */
             let pageLimit = min(totalPages, 40) // Flickr API returns max of 4000 results
             let randomPage = Int(arc4random_uniform(UInt32(pageLimit))) + 1
-            FlickrClient.sharedInstance().getImagesFromFlickrBySearchWithPage(methodArguments, pageNumber: randomPage, completionHandler: completionHandler)
+            FlickrClient.sharedInstance.getImagesFromFlickrBySearchWithPage(methodArguments, pageNumber: randomPage, completionHandler: completionHandler)
         }
         
         task.resume()
@@ -236,11 +236,6 @@ class FlickrClient: NSObject {
     }
     
     // MARK: - Shared Instance
+    static let sharedInstance = FlickrClient()
     
-    class func sharedInstance() -> FlickrClient {
-        struct Singleton {
-            static var sharedInstance = FlickrClient()
-        }
-        return Singleton.sharedInstance
-    }
 }

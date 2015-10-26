@@ -12,13 +12,13 @@ import CoreData
 
 class MapViewController: UIViewController, MKMapViewDelegate, NSFetchedResultsControllerDelegate {
     
-    var sharedContext: NSManagedObjectContext { return CoreDataStackManager.sharedInstance().managedObjectContext }
-    var privateQueueContext: NSManagedObjectContext { return CoreDataStackManager.sharedInstance().privateQueueContext }
+    var sharedContext: NSManagedObjectContext { return CoreDataStackManager.sharedInstance.managedObjectContext }
+    var privateQueueContext: NSManagedObjectContext { return CoreDataStackManager.sharedInstance.privateQueueContext }
     var tempPinContext: NSManagedObjectContext!
     
     var pinAddedViaLongPress: Pin! {
         didSet {
-            CoreDataStackManager.sharedInstance().saveContext()
+            CoreDataStackManager.sharedInstance.saveContext()
             print("ObjectID didSet: \(self.pinAddedViaLongPress.objectID)")
         }
     }
@@ -53,7 +53,7 @@ class MapViewController: UIViewController, MKMapViewDelegate, NSFetchedResultsCo
     }
     
     override func viewDidAppear(animated: Bool) {
-        CoreDataStackManager.sharedInstance().saveContext()
+        CoreDataStackManager.sharedInstance.saveContext()
     }
     
     @IBAction func userLongPressedMapView(sender: UILongPressGestureRecognizer) {
@@ -71,7 +71,7 @@ class MapViewController: UIViewController, MKMapViewDelegate, NSFetchedResultsCo
                 self.mapView.centerCoordinate = self.tempPin.coordinate
             }
             self.preFetchFlickerImages()
-            CoreDataStackManager.sharedInstance().saveContext()
+            CoreDataStackManager.sharedInstance.saveContext()
         }
         
     }
@@ -82,7 +82,7 @@ class MapViewController: UIViewController, MKMapViewDelegate, NSFetchedResultsCo
         print("Running preFetchFlickrImages")
         UIApplication.sharedApplication().networkActivityIndicatorVisible = true
         // Check if any photos in that location
-        FlickrClient.sharedInstance().getImageFromFlickrBySearch(tempPin.coordinate.latitude, longitude: tempPin.coordinate.longitude) { result, error in
+        FlickrClient.sharedInstance.getImageFromFlickrBySearch(tempPin.coordinate.latitude, longitude: tempPin.coordinate.longitude) { result, error in
             
             guard (error == nil) else {
                 // TODO: - Show error
@@ -99,7 +99,7 @@ class MapViewController: UIViewController, MKMapViewDelegate, NSFetchedResultsCo
                 print("created Pin")
                 self.mapView.removeAnnotation(self.tempPin)
                 self.mapView.addAnnotation(self.pinAddedViaLongPress)
-                CoreDataStackManager.sharedInstance().saveContext()
+                CoreDataStackManager.sharedInstance.saveContext()
             }
             
             if let photosDictionary = result?.valueForKey("photo") as? [[String : AnyObject]] {
@@ -122,7 +122,7 @@ class MapViewController: UIViewController, MKMapViewDelegate, NSFetchedResultsCo
                             photo.pin = self.privatePinAdded
                             return photo
                         }
-                        CoreDataStackManager.sharedInstance().savePrivateContext()
+                        CoreDataStackManager.sharedInstance.savePrivateContext()
                         self.preFetchCompleted = true
                     }
                 }
@@ -203,14 +203,18 @@ class MapViewController: UIViewController, MKMapViewDelegate, NSFetchedResultsCo
         controller.restoreMapRegion = self.fetchExistingMapRegion()
         
         if let photosDownloaded = numberOfPhotos {
+            print("photosDownloaded: \(photosDownloaded)")
             controller.numberOfPhotos = photosDownloaded
         } else {
+            print("pin.photos.count: \(controller.pin.photos.count)")
             controller.numberOfPhotos = controller.pin.photos.count
         }
         
         if preFetchCompleted == true {
+            print("prefetched completed = true")
             controller.preFetchedPhotos = true
         } else {
+            print("prefetched completed = false")
             controller.preFetchedPhotos = false
         }
         
@@ -226,7 +230,7 @@ class MapViewController: UIViewController, MKMapViewDelegate, NSFetchedResultsCo
             fetchedEntity.first?.long = mapView.region.center.longitude
             fetchedEntity.first?.latDelta = mapView.region.span.latitudeDelta
             fetchedEntity.first?.longDelta = mapView.region.span.longitudeDelta
-            CoreDataStackManager.sharedInstance().saveContext()
+            CoreDataStackManager.sharedInstance.saveContext()
         } catch let error as NSError {
             print("Error fetching mapRegion on regionDidChangeAnimated: \(error.localizedDescription)")
         }
